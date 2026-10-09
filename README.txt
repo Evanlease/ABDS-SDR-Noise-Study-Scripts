@@ -7,163 +7,117 @@ Captures taken September 21, 2026
 
 READ THIS FIRST
 
-This is the analysis code for a small study I ran on a 1090 MHz receiver. It's
-organized for reading. It doesn't run from this layout, and the raw captures
-aren't included. "Why it doesn't run from here" below says what's missing.
+This folder holds the MATLAB code that did the analysis for a small study I
+ran on a 1090 MHz receiver. This file is a guide to that code: how it's
+organized, what each file does, and how the files depend on each other. It
+only gives a short overview of the research.
 
-Everything comes from one receiver, at one site, on one day: seven captures of
-30 seconds each. Read every number below as a measurement of my station, not as
-a fact about RTL-SDR receivers in general.
-
-All power levels are in dBFS (decibels relative to the largest signal the
-receiver can record). They are uncalibrated. None of them are dBm.
+The code is organized for reading. It doesn't run from this layout, and the
+raw captures aren't included. "Why it doesn't run from here" at the bottom
+says what's missing.
 
 
-THE QUESTION
+THE STUDY IN BRIEF
 
 ADS-B is the system where aircraft broadcast their own position on 1090 MHz.
-Lots of people receive those broadcasts with a cheap USB radio (an RTL-SDR) and
-a decoder program called dump1090-fa. The decoder reports a "noise" number, and
-people graph it to judge how well their station is working.
+Lots of people receive it with a cheap USB radio (an RTL-SDR) and a decoder
+program called dump1090-fa. The decoder reports a "noise" number that people
+use to judge how well their station is working.
 
-I wanted to know three things:
+I recorded seven captures of 30 seconds each, on one receiver, at one site, on
+one day. Five were on 1090 MHz with aircraft traffic. Two were controls tuned
+to 1082 MHz, away from the ADS-B signal. The code asks three things of them:
 
   1. Does that noise number measure the receiver's background, or does
      aircraft traffic move it?
   2. Is there a way to measure the background that traffic doesn't move?
   3. What does a small background cost in decoded messages?
 
+The short version: the reported number sat 0.24 to 0.98 dB above the
+background on the traffic captures, and within 0.06 dB of it on the controls.
+Two estimators that only look at the center of the converter's range stayed
+within 0.04 dB of the control taken in the same two minutes. In a test with
+made-up signals, messages at my station's background needed 0.82 dB more SNR
+to decode half the time than they did at a large background.
 
-TERMS
+These are measurements of one station. Power levels are uncalibrated dBFS, not
+dBm. I'm not claiming any of it is new: forum posts had already pointed out
+that the noise number includes traffic, and I haven't finished my own search
+of earlier work.
+
+
+WORDS USED BELOW
 
   Background   The noise the receiver sees when no aircraft signal is there.
-
-  LSB          One step of the receiver's 8-bit converter. It stores every
-               sample as a whole number from 0 to 255, so one LSB is the
-               smallest change it can record.
-
+  LSB          One step of the receiver's 8-bit converter, which stores every
+               sample as a whole number from 0 to 255.
   Sigma        The spread (standard deviation) of the background, in LSB. At
-               my station it's 0.71 to 0.89 LSB, which is less than one step.
-               That's why rounding matters here.
-
+               my station it's under one LSB, which is why rounding matters.
+  Estimator    A formula that turns a set of samples into a sigma.
   I and Q      The two numbers the receiver records for every sample.
-
-  Mode S       The message format ADS-B uses. Mode A/C is an older, shorter
-               reply that aircraft also send on 1090 MHz.
-
-  Preamble     The short pulse pattern that starts every Mode S message. The
-               decoder counts every spot where it thinks it sees one.
-
+  Mode S       The message format ADS-B uses.
+  Preamble     The short pulse pattern that starts every Mode S message.
   SNR          Signal-to-noise ratio, in dB.
-
   Twin         A file of made-up noise built to match a real capture.
+  Table        A CSV file of results.
 
 
-THE SETUP
+HOW THE CODE IS ORGANIZED
 
-  Receiver      RTL-SDR Blog V3 (RTL2832U chip with an 8-bit converter,
-                R820T2 tuner)
-  Antenna       The telescopic dipole that came with it, on a rooftop. I
-                didn't record its length, height or orientation.
-  Gain          Fixed at 44.5 dB
-  Sample rate   2.4 million samples per second, 8-bit I and 8-bit Q
-  Recorder      rtl_sdr
-  Decoder       dump1090-fa 11.1, run on the recorded files
-  Analysis      MATLAB R2026a, no toolboxes
+There are 35 MATLAB files and about 1,400 lines of code. They come in three
+kinds.
 
-The seven captures:
+  Settings (1 file)
+      expConfig.m is a function that returns every setting in one place.
 
-  #     Local time   Tuned to    Role      Sigma (LSB)   Mode S decoded
-  001   09:25        1090 MHz    traffic   0.849         1,844
-  002   13:13        1090 MHz    traffic   0.767         1,933
-  003   16:27        1090 MHz    traffic   0.710         1,591
-  004   16:57        1082 MHz    control   0.889         0
-  005   22:02        1090 MHz    traffic   0.721         1,412
-  006   22:03        1082 MHz    control   0.717         0
-  007   22:04        1090 MHz    traffic   0.718         912
+  Scripts (17 files)
+      Each script runs one experiment from start to finish. The 14 in folders
+      1 to 4 are the analysis. The 3 in Tests are small checks.
 
-Each capture is 30 seconds, which is 72,000,000 samples and 144 MB.
+  Helpers (17 files)
+      Each helper is a function that does one small job, like reading a
+      capture file or making noise. 12 of the 17 are under 20 lines of code.
 
-Captures 004 and 006 are the controls. I tuned them to 1082 MHz, where a quick
-scan beforehand found no loud pulses, so they show the background without
-ADS-B traffic. Captures 005, 006 and 007 were taken within two minutes of each
-other, so one control sits between two traffic captures.
+Four rules hold it together:
 
+  1. Every analysis script starts with the same line, cfg = expConfig();
+     which loads the settings.
+  2. No script calls another script. Scripts only call helpers.
+  3. Scripts pass results to each other through tables. A script reads the
+     tables it needs, does its work, and saves its own. That's why the run
+     order is fixed.
+  4. Helpers never touch the result tables. Only scripts read and save those.
 
-WHAT I FOUND
-
-1. The noise number dump1090 reports includes traffic.
-
-   On the five traffic captures it sat 0.24 to 0.98 dB above the background.
-   On the two controls it sat 0.00 and 0.06 dB above it. Across the three
-   captures taken within two minutes, the reported number moved 1.0 dB while
-   the background moved less than 0.05 dB.
-
-2. Most of that extra power comes from signals the decoder never decoded.
-
-   I hid every decoded message (Mode S and Mode A/C), plus 500 samples (208
-   microseconds) on each side, and measured again. That removed only 14 to 44%
-   of the extra power.
-
-3. Two estimators that only look at the center of the converter's range held
-   steady.
-
-   The first counts the share of samples that land in the four center squares
-   (the cell fraction). The second fits a rounded bell curve to the middle
-   bytes (the central fit). On the real captures, both stayed within 0.04 dB
-   of the control taken in the same two minutes. On made-up noise with no
-   traffic, from 0.5 to 6 LSB, both were within 0.02 dB of the true value.
-
-   They resist traffic. They aren't immune to it. In a made-up test at 0.72
-   LSB, with test messages covering about 18% of the samples, the cell
-   fraction read 1.02 dB high and the central fit read 0.46 dB high.
-   dump1090's number rose 2.1 dB in the same test. My real captures had under
-   1% of their samples covered by decoded messages.
-
-4. The median-based estimators got stuck on the converter's steps.
-
-   The clearest case is the statistic dump1090's automatic gain uses, a 40th
-   percentile. It read -44.99 dBFS on all seven captures while the background
-   power changed by 1.7 dB.
-
-5. The preamble count follows the background.
-
-   The count ran from 342,520 to 498,369 per capture. A straight line against
-   sigma fit all seven captures within 1.8% (r = 0.998). Noise alone produces
-   most of these: the two controls had no Mode S messages and still gave
-   359,962 and 498,369.
-
-6. A small background costs sensitivity. This one is a made-up test.
-
-   I added test messages to made-up noise at 11 background levels, 900
-   messages at each 1 dB step of SNR, and counted how many dump1090 decoded.
-   At 0.72 LSB, which is about my station, messages needed 0.82 dB more SNR to
-   decode half the time than they did at 6 LSB. At 0.5 LSB they needed 1.47 dB
-   more.
+Most scripts have the same shape: load the settings, loop over the captures or
+over a list of noise levels, collect the results in a table, then save the
+table and print it. Each block of code has a short comment above it that says
+what the block does.
 
 
-WHAT I'M NOT CLAIMING
+HOW THE DATA MOVES
 
-I'm not claiming any of this is new. Forum posts already pointed out that
-dump1090's noise number includes traffic (obj in 2016, wiedehopf in 2020), and
-the cell fraction idea comes from radio astronomy (Jenet and Anderson, 1998).
-What this adds is the size of the effect at one station. I haven't finished my
-own search of earlier work, so I can't say nobody has measured it before.
+      The seven captures                Made-up noise and test
+      and their tables of               messages, built by the
+      decoded messages                  helpers
+              |                                 |
+              v                                 v
+        The scripts in folders 1 to 3, which also run dump1090
+                                |
+                                v
+                        18 result tables
+                                |
+                                v
+                     makeFigures, in folder 4
+                                |
+                                v
+                          four figures
 
-I'm not claiming the error is the same size anywhere else, or that any gain
-setting is best.
+Of the 14 analysis scripts, nine open the real captures. Three build made-up
+noise instead (runSynth, runOccupancy and falseAccept). Two work only from
+tables (runPreambleLaw and makeFigures). Nine of the 14 run dump1090.
 
-Limits you should know about:
-
-  - One dongle, one antenna, one site, one day, 3.5 minutes of data in total.
-  - My site is quiet: 30 to 64 Mode S messages per second. What happens at a
-    busy site is simulated only.
-  - Every result above 0.89 LSB is made up, or made by adding noise to a real
-    capture.
-  - The 1082 MHz control isn't guaranteed to be empty. Other aviation systems
-    use that band, and the edges of a strong 1090 MHz signal can reach it. I
-    didn't test for either one.
-  - Only dump1090-fa 11.1 was tested.
+A script that builds a made-up capture writes it to one scratch file and runs
+dump1090 on that file, the same way it runs on a real capture.
 
 
 WHAT'S IN EACH FOLDER
@@ -180,88 +134,184 @@ WHAT'S IN EACH FOLDER
   Helpers         17 files   Functions the scripts call
   Tests           3 files    Small checks of single functions
 
-That's 35 MATLAB files. Folders 1 to 4 are numbered in the order they run.
+Folders 1 to 4 are numbered in the order they run.
+
+
+THE SETTINGS FILE
+
+expConfig.m returns one variable, cfg, that holds:
+
+  - Where things live: the captures, the tables of decoded messages, the
+    result tables, and the scratch file for made-up captures
+  - The path to dump1090 (line 15)
+  - The sample rate (2.4 million per second), the samples in one capture (72
+    million), and dump1090's clock rate (12 MHz)
+  - The center and scale dump1090 uses to turn bytes into signal strength
+  - The length of a preamble (19 samples)
+  - The names of the seven captures, their short labels, and which five were
+    on 1090 MHz
 
 
 RUN ORDER
 
-Each script needs tables made by the ones above it. This order comes from
-which tables each script reads and writes.
+Each script needs tables made by the ones above it. "Reads" is what the script
+takes in, "Calls" is the helpers it uses, and "Makes" is what it saves.
 
    1  checkStep1       (1 Audit)
       Four checks that the MATLAB math matches dump1090: its counts, the byte
       statistics, its noise number rebuilt from the raw samples, and the file
       reader and writer.
-      Makes: step1.csv
+      Reads:  the captures and their decoded messages
+      Calls:  byteHist, dumpLUT, readDecoded, readUC8, runDump1090, writeUC8
+      Makes:  step1.csv
 
    2  auditMetrics     (1 Audit)
       Finds each capture's background from the center squares and compares it
       with the noise dump1090 reported. Also works out what the automatic gain
       statistic would read.
-      Makes: audit.csv
+      Reads:  the captures and their decoded messages, step1.csv
+      Calls:  adaptiveP40, byteHist, dumpLUT, quantModel, readDecoded,
+              readUC8, sigmaFromCellDC
+      Makes:  audit.csv
 
    3  estimatorsReal   (2 Estimators)
       Runs all eight estimators on each capture three ways: the whole file,
       the file with decoded messages cut out, and each 1 second block.
-      Makes: real_est.csv, real_acf.csv
+      Reads:  the captures and their decoded messages, audit.csv
+      Calls:  allEstimators, byteHist, readDecoded, readUC8, synthNoise
+      Makes:  real_est.csv, real_acf.csv
 
    4  runSynth         (2 Estimators)
       Runs the estimators on made-up noise at 21 sigmas from 0.5 to 6 LSB,
       where the true answer is known. Runs dump1090 on each file too.
-      Makes: synth_est.csv, synth_dump.csv
+      Reads:  audit.csv
+      Calls:  allEstimators, byteHist, dumpLUT, quantModel, runDump1090,
+              synthNoise, writeUC8
+      Makes:  synth_est.csv, synth_dump.csv
 
    5  maskRecount      (2 Estimators)
       Hides decoded messages with wider and wider guards and measures how much
       extra power is left.
-      Makes: mask_noise.csv, mask_tail.csv
+      Reads:  the captures and their decoded messages, audit.csv, real_acf.csv
+      Calls:  colorTwin, dumpLUT, quantModel, readDecoded, readUC8
+      Makes:  mask_noise.csv, mask_tail.csv
 
    6  runOccupancy     (2 Estimators)
       Adds test messages to made-up noise until they fill 0 to 20% of the
       file, and tracks how far each estimator and dump1090's number rise.
-      Makes: occupancy.csv
+      Reads:  real_est.csv, real_acf.csv
+      Calls:  allEstimators, byteHist, colorTwin, dumpLUT, injectFrames,
+              modesFrame, quantModel, runDump1090, writeUC8
+      Makes:  occupancy.csv
 
    7  fixCompare       (3 Detections)
       Runs dump1090 on each capture with and without --fix, its option for
       repairing messages with one wrong bit.
-      Makes: fix_compare.csv
+      Reads:  the captures
+      Calls:  runDump1090
+      Makes:  fix_compare.csv
 
    8  runColorTwins    (3 Detections)
-      Builds two twins of each capture and compares their preamble counts
-      with the real one. One twin is plain noise. The other also copies how
-      alike neighboring samples are in the real receiver.
-      Makes: color_twins.csv
+      Builds a twin of each capture that also copies how alike neighboring
+      samples are in the real receiver. Compares its preamble count with the
+      real capture's and with the plain noise from runSynth.
+      Reads:  the captures, audit.csv, real_est.csv, real_acf.csv,
+              synth_dump.csv
+      Calls:  colorTwin, runDump1090, writeUC8
+      Makes:  color_twins.csv
 
    9  runDither        (3 Detections)
       Adds noise to captures 003 and 006 and to their twins, to raise the
       background to 1.5, 2, 3 and 4 LSB.
-      Makes: dither.csv
+      Reads:  the captures, real_est.csv, real_acf.csv
+      Calls:  allEstimators, byteHist, colorTwin, ditherIQ, readUC8,
+              runDump1090, writeUC8
+      Makes:  dither.csv
 
   10  runPreambleLaw   (3 Detections)
       Fits the straight line of preamble count against sigma, for the real
       captures and for their twins.
-      Makes: preamble_law.csv, preamble_law_fit.csv
+      Reads:  audit.csv, fix_compare.csv, color_twins.csv, dither.csv
+      Calls:  preambleLaw
+      Makes:  preamble_law.csv, preamble_law_fit.csv
 
   11  runInjection     (3 Detections)
       Adds test messages at 23 SNR levels to noise at 11 backgrounds and
       records the share dump1090 decodes. Repeats it on control 006 and its
       twin as a check.
-      Makes: injection.csv, injection_summary.csv
+      Reads:  the captures, real_est.csv, real_acf.csv
+      Calls:  colorTwin, injectFrames, modesFrame, readUC8, runDump1090,
+              writeUC8
+      Makes:  injection.csv, injection_summary.csv
 
   12  snrAnchor        (3 Detections)
       Measures the SNR of every real Mode S message dump1090 decoded, after
       checking the method on made-up messages of known SNR.
-      Makes: snr_anchor_cal.csv, snr_anchor_real.csv
+      Reads:  the captures and their decoded messages, real_est.csv,
+              real_acf.csv, injection.csv
+      Calls:  colorTwin, injectFrames, modesFrame, readDecoded, readUC8,
+              runDump1090, writeUC8
+      Makes:  snr_anchor_cal.csv, snr_anchor_real.csv
 
   13  makeFigures      (4 Figures)
-      Draws the four figures from the tables above.
-      Makes: fig1_audit.png      reported noise next to the background
-             fig2_preambles.png  preamble count against the background
-             fig3_injection.png  how often messages decode against SNR
-             fig4_occupancy.png  how far each estimate rises with traffic
+      Draws the four figures from 7 of the 18 tables.
+      Reads:  audit.csv, fix_compare.csv, color_twins.csv, dither.csv,
+              injection.csv, injection_summary.csv, occupancy.csv
+      Calls:  dumpLUT, preambleLaw, quantModel
+      Makes:  fig1_audit.png      reported noise next to the background
+              fig2_preambles.png  preamble count against the background
+              fig3_injection.png  how often messages decode against SNR
+              fig4_occupancy.png  how far each estimate rises with traffic
 
-falseAccept (3 Detections) and the three tests stand alone and can run any
-time. falseAccept runs dump1090 on pure noise and prints every message it
-thought it found.
+falseAccept (3 Detections) stands alone. It runs dump1090 on pure noise and
+prints every message it thought it found. It calls runDump1090, synthNoise and
+writeUC8, and it saves nothing.
+
+
+THE HELPERS
+
+I've grouped them here by the job they do. In the folder they're one flat list.
+
+  Reading and writing files
+
+    readUC8           Reads a capture file into I and Q bytes
+    writeUC8          Writes I and Q bytes back out as a capture file
+    readDecoded       Reads the table of decoded messages for one capture
+
+  Working with dump1090
+
+    runDump1090       Runs dump1090 on a file and pulls out its counts or its
+                      messages
+    dumpLUT           Rebuilds dump1090's table of signal strength for every
+                      pair of bytes
+    adaptiveP40       Copies the statistic dump1090's automatic gain uses
+
+  Estimating the noise
+
+    allEstimators     Runs all eight estimators
+    byteHist          Counts how many samples land on each pair of I and Q
+                      bytes
+    cellSigma         Turns the share of samples in the center squares into
+                      sigma
+    sigmaFromCellDC   The same, when the center isn't exactly 127.5
+    quantModel        The chance of each byte when a bell curve gets rounded
+
+  Making test signals
+
+    synthNoise        Makes made-up noise at a chosen sigma
+    colorTwin         Builds a twin whose neighboring samples are as alike as
+                      the real receiver's
+    ditherIQ          Adds random noise to every byte, then rounds it
+    modesFrame        Builds one Mode S test message and its 24 check bits
+    injectFrames      Adds test messages to a file of noise
+
+  Fitting
+
+    preambleLaw       Fits the straight line of preamble count against sigma
+
+Helpers mostly stand alone. allEstimators is the exception: it calls cellSigma,
+dumpLUT and sigmaFromCellDC. Four helpers load the settings themselves
+(adaptiveP40, dumpLUT, readDecoded and runDump1090).
 
 
 THE EIGHT ESTIMATORS
@@ -274,36 +324,16 @@ a sigma.
   medianMag     From the middle value of the signal strength
   mad           From the typical distance of each byte from its middle value
   p40           From the 40th percentile that dump1090's automatic gain uses
-  cellDC        The cell fraction, using the receiver's measured center
-  cellCentred   The cell fraction, assuming the center is exactly 127.5
-  centralFit    The central fit
-
-
-THE HELPERS
-
-  adaptiveP40       Copies the statistic dump1090's automatic gain uses
-  allEstimators     Runs all eight estimators
-  byteHist          Counts how many samples land on each pair of I and Q bytes
-  cellSigma         Turns the share of samples in the center squares into sigma
-  colorTwin         Builds a twin whose neighboring samples are as alike as
-                    the real receiver's
-  ditherIQ          Adds random noise to every byte, then rounds it
-  dumpLUT           Rebuilds dump1090's table of signal strength for every
-                    pair of bytes
-  injectFrames      Adds test messages to a file of noise
-  modesFrame        Builds one Mode S test message and its 24 check bits
-  preambleLaw       Fits the straight line of preamble count against sigma
-  quantModel        The chance of each byte when a bell curve gets rounded
-  readDecoded       Reads the table of decoded messages for one capture
-  readUC8           Reads a capture file into I and Q bytes
-  runDump1090       Runs dump1090 on a file and pulls out its counts or its
-                    messages
-  sigmaFromCellDC   The cell fraction when the center isn't exactly 127.5
-  synthNoise        Makes made-up noise at a chosen sigma
-  writeUC8          Writes I and Q bytes back out as a capture file
+  cellDC        The share of samples in the four center squares, using the
+                receiver's measured center
+  cellCentred   The same, assuming the center is exactly 127.5
+  centralFit    Fits a rounded bell curve to the middle bytes
 
 
 THE TESTS
+
+Each test checks one helper against numbers typed into the test. They don't
+need the captures or dump1090.
 
   testCellSigma     Checks cellSigma against the two controls
   testModesFrame    Checks modesFrame against a published example message
@@ -339,4 +369,5 @@ itself, writes results to a folder called out next to itself, and looks for
 the decoded tables in a folder one level up. None of those are here.
 
 Everything was run from one flat folder with the data beside it. It has not
-been run from this layout.
+been run from this layout. The run order above comes from which tables each
+script reads and writes.
